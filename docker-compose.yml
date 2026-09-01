@@ -1,0 +1,127 @@
+# ============================================================
+#  docker-compose.yml — Auth API
+#
+#  Uso locale (singola macchina, senza Swarm):
+#    docker compose up --build        # build + avvio
+#    docker compose up -d --build      # in background
+#    docker compose down
+#
+#  Uso su Swarm a 5 nodi (mit4me01..mit4me05):
+#    1) Su mit4me01: ./build.sh                 (build + distribuzione
+#       dell'immagine sugli altri 4 nodi via docker save/scp/load — Swarm
+#       non builda MAI immagini, "docker stack deploy" ignora "build:"
+#       sotto con un solo warning e si aspetta l'immagine già presente).
+#    2) set -a; source .env; set +a             ⚠️ leggi la nota sotto
+#    3) docker stack deploy -c docker-compose.yml <nome-stack>
+#
+#  Le variabili sotto (IMAGE_NAME, VERSION_TAG, UID, GID, PORT, LOG_DIR,
+#  HEALTHCHECK_INTERVAL, HEALTHCHECK_TIMEOUT, HEALTHCHECK_START_PERIOD,
+#  HEALTHCHECK_RETRIES) sono personalizzabili via variabili d'ambiente o
+#  file ".env" nella stessa cartella (es. "LOG_DIR=/var/log/auth-api" in
+#  .env) — stesso principio degli argomenti di build.sh, qui espresso in
+#  sintassi docker-compose (${VAR:-default}).
+#
+#  ⚠️ GOTCHA "docker stack deploy" vs ".env": a differenza di
+#  "docker compose", "docker stack deploy" NON legge automaticamente il
+#  file ".env" in questa cartella — l'interpolazione delle ${VAR:-default}
+#  usa solo le variabili già esportate nella shell da cui lanci il comando.
+#  Senza il passaggio 2) sopra, ogni ${VAR:-default} qui sotto ricade
+#  silenziosamente sul proprio default (nessun errore, solo un possibile
+#  disallineamento silenzioso — es. VERSION_TAG che punta a una versione
+#  diversa da quella appena distribuita da build.sh).
+# ============================================================
+
+version: "3.8"   # richiesto da alcune versioni di "docker stack deploy" per
+                  # riconoscere il file come Compose v3 — "docker compose"
+                  # locale lo accetta comunque (al più un warning innocuo di
+                  # "attribute obsolete", non un errore).
+
+services:
+  auth-api:
+    # Sezione "build:" usata solo da "docker compose up --build" in locale
+    # (utile per test rapidi su una singola macchina). "docker stack deploy"
+    # la ignora del tutto (warning "unsupported/ignored") — su Swarm
+    # l'immagine deve già esistere sul nodo (vedi build.sh, passo 1 sopra).
+    build:
+      context: .
+      args:
+        # UID/GID dell'utente non privilegiato "authapi" nell'immagine —
+        # DEVONO combaciare con l'owner di LOG_DIR sull'host, altrimenti il
+        # processo (gunicorn, non-root) non può scrivere nel bind-mount e
+        # crasha con PermissionError al boot. Su questa macchina l'utente
+        # corrente è 1000:1000 (verificato con `id -u`/`id -g`), da cui i
+        # default sotto — su un host diverso, sovrascrivi UID/GID.
+        UID: "${UID:-1000}"
+        GID: "${GID:-1000}"
+        PORT: "${PORT:-3002}"
+    # Stesso nome:tag prodotto da build.sh (IMAGE_NAME/VERSION_TAG letti da
+    # release/patch/version) — su Swarm, senza un registry configurato,
+    # questo riferimento risolve all'immagine caricata localmente su ciascun
+    # nodo da build.sh (docker load); se il pull dal registry di default
+    # (Docker Hub) fallisce, Swarm ricade sulla cache locale del nodo, per
+    # questo il tag DEVE già esistere lì prima del deploy.
+    image: "${IMAGE_NAME:-auth-api}:${VERSION_TAG:-v1.2.1}"
+    ports:
+      - "${PORT:-3002}:${PORT:-3002}"
+    volumes:
+      # Bind-mount da host: il file di log (config.yaml, logging.dir=
+      # /var/log/mit4me/auth) resta leggibile/persistente fuori dal
+      # container e sopravvive a "docker compose down"/rischedulazioni.
+      # LOG_DIR punta a ./log-host di default — creala prima del primo
+      # avvio con owner UID:GID coerente (es. "mkdir log-host" da un utente
+      # 1000:1000), altrimenti Docker la crea come root e riproduce lo
+      # stesso problema di permessi che il chown nel Dockerfile risolve
+      # solo per il caso NON montato.
+      # ⚠️ Su Swarm a 5 nodi: il task può essere schedulato su uno
+      # qualunque dei nodi ad ogni deploy/riavvio — "${LOG_DIR:-./log-host}"
+      # è quindi un path LOCALE al nodo che lo riceve, non condiviso fra i
+      # 5. I log finiscono sparsi per nodo (ognuno con la propria cartella,
+      # tutte da creare/chownare in anticipo con lo stesso UID:GID) — non è
+      # un errore, ma un log centralizzato richiede uno storage condiviso
+      # (NFS, volume driver di rete) o un vincolo di piazzamento esplicito.
+      # Per fissare il servizio su un solo nodo (log sempre nello stesso
+      # posto), scommenta sotto la sezione "deploy.placement.constraints".
+      - "${LOG_DIR:-./log-host}:/var/log/mit4me/auth"
+      # Alternativa: volume nominato invece di una cartella host — nessun
+      # problema di UID/GID da allineare (Docker eredita i permessi impostati
+      # nell'immagine), ma i log restano dentro l'area gestita da Docker,
+      # non direttamente navigabili da host. Per usarla: commenta la riga
+      # sopra, scommenta questa e la sezione "volumes:" in fondo al file.
+      # - auth-api-logs:/var/log/mit4me/auth
+    # "restart:" (sintassi Compose classica) è ignorato da "docker stack
+    # deploy" — resta qui solo per "docker compose" locale. Su Swarm è
+    # "deploy.restart_policy" sotto a governare il riavvio automatico.
+    restart: unless-stopped
+    # Sovrascrive per intero l'HEALTHCHECK del Dockerfile (--interval=30s
+    # fisso, non leggibile da variabile d'ambiente: i parametri della
+    # direttiva HEALTHCHECK sono fissati al build dell'immagine, solo il
+    # comando CMD stesso — eseguito a runtime — può leggere env vars, come
+    # già fa con PORT). Qui invece, essendo nel compose file, si può usare
+    # la stessa sintassi ${VAR:-default} già in uso sopra. Stesso identico
+    # comando del Dockerfile (GET /health senza ?debug — solo TCP verso il
+    # SOAP esterno, nessuna chiamata reale, sicuro da pollare ad alta
+    # frequenza), letto sia da "docker compose" locale sia da "docker stack
+    # deploy" — non serve mantenerne due copie diverse.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,urllib.request,sys; p=os.environ.get('PORT','3002'); sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{p}/mit4me/auth/api/v1/health', timeout=3).status == 200 else 1)"]
+      interval: "${HEALTHCHECK_INTERVAL:-30s}"
+      timeout: "${HEALTHCHECK_TIMEOUT:-5s}"
+      start_period: "${HEALTHCHECK_START_PERIOD:-10s}"
+      retries: ${HEALTHCHECK_RETRIES:-3}
+    deploy:
+      # Chiave letta SOLO da "docker stack deploy" (ignorata da un normale
+      # "docker compose up", che per quello usa "restart:" sopra) —
+      # equivalente Swarm di "restart: unless-stopped": "any" riavvia il
+      # task qualunque sia la causa di uscita (crash, OOM, nodo che
+      # rientra), non solo un errore.
+      replicas: 1
+      restart_policy:
+        condition: any
+      # placement:
+      #   constraints:
+      #     - node.hostname == mit4me01   # fissa il servizio a un nodo
+      #       # solo, per centralizzare i log del bind-mount sopra invece
+      #       # di lasciarli sparsi sui 5 nodi — non attivo di default.
+
+# volumes:
+#   auth-api-logs:

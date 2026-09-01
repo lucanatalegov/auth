@@ -1,0 +1,25 @@
+# Config reale — contiene credenziali (password DB, token SOAP).
+# Vedi app/config/config.yaml.example per il template senza segreti.
+app/config/config.yaml
+
+# Log applicativi
+logs/*
+!logs/.gitkeep
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Materiale di riferimento non applicativo (vedi CLAUDE.md — non fa parte
+# dell'app, alcuni file hanno permessi ristretti/contenuto non destinato al repo)
+otp/
+
+# Impostazioni locali Claude Code
+.claude/settings.local.json
+
+# OS
+.DS_Store

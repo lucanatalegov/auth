@@ -1,0 +1,164 @@
+version: '3.9'
+services:       
+    authmanager:
+        image: nginx:1.27.0
+        ports:
+            - "5005:80"
+        volumes:
+            - /etc/localtime:/etc/localtime:ro
+            - ./auth/nginx/conf/api.conf:/etc/nginx/conf.d/default.conf:ro
+            - ./images/nginx.ico:/usr/share/nginx/html/favicon.ico:ro
+            - /var/log/mit4me/api:/var/log/nginx 
+        depends_on:
+            - oldotpapi
+            - auth-api
+            - robot4meV1api1            
+        deploy:
+            replicas: 1
+            placement:
+                max_replicas_per_node: 1
+                #constraints:
+                #    - node.hostname ==mit4me01
+            resources:
+                limits:
+                    cpus: '1'
+                    memory: 1G
+            restart_policy:
+                condition: on-failure
+        networks:
+           production:
+
+    oldotpapi:
+        image: mit4me/python:3.9.19
+        #ports:
+        #    - "5001:5001"
+        volumes:
+            - /etc/localtime:/etc/localtime:ro
+            - ./auth/scriptsV2:/app/mit4me/api/scriptsV2:ro
+            #- ./common/scripts/otp/otp.py:/app/mit4me/api/scripts/otp.py:ro
+            #- ./common/scripts/common/api.json:/app/mit4me/api/scripts/api.json:ro
+            #- ./common/scripts/common/common.py:/app/mit4me/api/scripts/common.py:ro
+            - /var/log/mit4me/api:/var/log/mit4me/api
+        command: ["python3","/app/mit4me/api/scriptsV2/otp/otp.py"]
+        #command: ["sleep","36000"]
+        networks:
+            production:
+            #aliases:
+            # - otp-server
+        deploy:
+            replicas: 1
+            placement:
+                max_replicas_per_node: 1
+                #constraints:
+                #    - node.hostname ==mit4me01          
+            resources:
+                limits:
+                    cpus: '1'
+                    memory: 500M
+            restart_policy:
+                condition: on-failure
+#    userapi:
+#        image: mit4me/python:3.9.19
+#        #ports:
+#        #    - "5001:5001"
+#        volumes:
+#            - /etc/localtime:/etc/localtime:ro
+#            - ./api/scripts:/app/mit4me/api/scripts:ro
+#            - /var/log/mit4me/api:/var/log/mit4me/api
+#        command: ["python3","/app/mit4me/api/scripts/user/checkuser.py"]
+#        #command: ["bash","/app/mit4me/userapi/scripts/test.sh"]
+#        networks:
+#            production:
+#            #aliases:
+#            # - otp-server
+#        deploy:
+#            replicas: 1
+#            placement:
+#                max_replicas_per_node: 1
+#                #constraints:
+#                #    - node.hostname ==mit4me01
+#                #    #- "node.labels.test == yes"
+#                                    
+#            resources:
+#                limits:
+#                    cpus: '1'
+#                    memory: 500M
+#            restart_policy:
+#                condition: on-failure
+    robot4meV1api1:
+        image: mit4me/python:3.9.19
+        #ports:
+        #    - "5001:5001"
+        volumes:
+            - /etc/localtime:/etc/localtime:ro
+            - ./auth/scripts:/app/mit4me/api/scripts:ro
+            - /var/log/mit4me/api:/var/log/mit4me/api
+        command: ["python3","/app/mit4me/api/scripts/robot4meV1/robot4me.py"]
+        #command: ["bash","/app/mit4me/userapi/scripts/test.sh"]
+        networks:
+            production:
+            #aliases:
+            # - otp-server
+        deploy:
+            replicas: 1
+            placement:
+                max_replicas_per_node: 1
+                #constraints:
+                #    - node.hostname ==mit4me01
+                #    #- "node.labels.test == yes"
+                                    
+            resources:
+                limits:
+                    cpus: '1'
+                    memory: 500M
+            restart_policy:
+                condition: on-failure
+    auth-api:
+        image: auth-api:v1.2.1
+        ports:
+            - "3002:3000"
+        # Sovrascrive il CMD del Dockerfile (gunicorn --workers 4 fisso) senza
+        # bisogno di rebuildare l'immagine — GUNICORN_WORKERS configurabile
+        # allo stesso modo di HEALTHCHECK_INTERVAL sotto. Con 4 worker fissi
+        # su 2 CPU/2G RAM, sotto carico concorrente (verificato dal vivo con
+        # 20 richieste concorrenti a /health: risposte in "onde" da 4 ogni
+        # ~22ms, mentre elapsed_time nel body restava costante — segno di
+        # coda in attesa di un worker libero, non di lavoro applicativo
+        # lento) i worker si esauriscono rapidamente. Il carico e' I/O-bound
+        # (query PostgreSQL, chiamate SOAP esterne — i worker sync passano
+        # la maggior parte del tempo bloccati in attesa, non a calcolare),
+        # quindi il limite pratico e' la RAM per processo, non le 2 CPU:
+        # partito a 8 worker, da verificare con "docker stats"/"docker
+        # service ps" che la memoria non saturi i 2048M sopra.
+        command: ["sh", "-c", "exec gunicorn --workers ${GUNICORN_WORKERS:-8} --bind 0.0.0.0:${PORT:-3000} main:app"]
+        volumes:
+            - /var/log/mit4me/auth:/var/log/mit4me/auth
+        networks:
+            production:
+        healthcheck:
+            test: ["CMD", "python", "-c", "import os,urllib.request,sys; p=os.environ.get('PORT','3002'); sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{p}/mit4me/auth/api/v1/health', timeout=3).status == 200 else 1)"]
+            interval: "${HEALTHCHECK_INTERVAL:-120s}"
+            timeout: "${HEALTHCHECK_TIMEOUT:-5s}"
+            start_period: "${HEALTHCHECK_START_PERIOD:-10s}"
+            retries: ${HEALTHCHECK_RETRIES:-3}
+        deploy:
+            replicas: 1
+            placement:
+                max_replicas_per_node: 1
+                #constraints:
+                #    - node.hostname ==mit4me01
+                #    #- "node.labels.test == yes"
+                                    
+            resources:
+                limits:
+                    cpus: '2'
+                    memory: 2048M
+            restart_policy:
+                condition: any
+      
+            
+
+networks:
+    production:
+        external: true
+        name: produzione 

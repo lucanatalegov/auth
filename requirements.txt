@@ -1,0 +1,12 @@
+Flask>=3.0
+flask-openapi3[swagger]>=4.3.1
+pydantic[email]>=2.4
+PyYAML>=6.0
+requests>=2.31
+xmltodict>=0.13
+pytz>=2024.1
+psycopg2-binary>=2.9
+redis>=5.0
+flask-limiter>=3.5
+pyotp>=2.9
+qrcode[pil]>=7.4

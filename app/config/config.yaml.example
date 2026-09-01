@@ -1,0 +1,275 @@
+# ============================================================
+#  Auth API — configurazione applicazione (v1.p2.v1)
+#  TEMPLATE — copiare in config.yaml e valorizzare i placeholder
+#  <...> prima dell'avvio. config.yaml reale è in .gitignore,
+#  non va mai committato (contiene credenziali di produzione).
+# ============================================================
+
+app:
+  host: "0.0.0.0"
+  port: 3002
+  debug: true
+
+api:
+  base_path: "/mit4me/auth/api"
+
+version:
+  release: ""
+  patch: ""
+
+logging:
+  level: "DEBUG"
+  # Cartella di log: RELATIVA alla root del progetto oppure ASSOLUTA
+  # (es. "/var/log/sportello")
+  dir: "/var/log/mit4me/auth"
+  # Nome del file di log
+  filename: "api-auth.log"
+  max_bytes: 5242880
+  backup_count: 5
+  # Se false, disabilita la scrittura dei log su stdout/console
+  console_enabled: true
+
+rate_limit:
+  credential_verify_portale_limit: "10 per minute"
+  credential_verify_limit: "10 per minute"
+  storage_uri: "memory://"
+
+credential_verify_portale:
+  login_pattern: '^(EE[A-Z]{2}[0-9]{5}|P0[0-9]{4,5}|AG[A-Z]{2}[0-9]{6}|OP[A-Z]{2}[0-9]{5})$'
+  login_examples:
+    - "EEAB12345"
+    - "P012345"
+    - "AGAB123456"
+  # Password: almeno una lettera, almeno un carattere speciale, lunghezza minima 8
+  password_pattern: '^(?=.*[A-Za-z])(?=.*[^A-Za-z0-9]).{8,}$'
+  password_examples:
+    - "Passw0rd!"
+  # Trasformazione applicata alla password PRIMA della validazione:
+  # "upper" | "lower" | "none"
+  password_case: "lower"
+
+# Copia di credential_verify_portale, punto di partenza per un servizio distinto.
+# soap/ldap/db sono placeholder che indicano il backend di verifica attivo:
+# uno solo puo' essere true, gli altri false. Al momento solo "soap" e'
+# realmente implementato (call_credential_verify_soap); ldap/db sono
+# riservati per backend futuri non ancora sviluppati.
+# NOTA: "db" (non "postgres") per non confondersi con la chiave top-level
+# postgres: (connessione DB principale dell'app).
+credential_verify:
+  login_pattern: '^(EE[A-Z]{2}[0-9]{5}|P0[0-9]{4,5}|AG[A-Z]{2}[0-9]{6}|OP[A-Z]{2}[0-9]{5})$'
+  login_examples:
+    - "EEAB12345"
+    - "P012345"
+    - "AGAB123456"
+  password_pattern: '^(?=.*[A-Za-z])(?=.*[^A-Za-z0-9]).{8,}$'
+  password_examples:
+    - "Passw0rd!"
+  # Trasformazione applicata alla password PRIMA della validazione:
+  # "upper" | "lower" | "none"
+  password_case: "lower"
+  # Provincia associata all'ufficio dell'utente (campo obbligatorio "prov").
+  prov_pattern: '^[A-Z]{2}$'
+  prov_examples:
+    - "RM"
+    - "MI"
+    - "TO"
+  soap: true
+  ldap: false
+  db: false
+
+# 2FA (TOTP app / HOTP mail), stesso processo di Auth API — vedi
+# sql/otp_2fa_schema.sql per il DDL (public.service_accounts,
+# public.otp_methods, config.mail_templates, history.otp_requests).
+otp2fa:
+  # Formato della login per TUTTI gli endpoint /otp/* (login e, dove presente,
+  # requested_by_login). Diverso, su richiesta esplicita dell'utente (sessione
+  # successiva a quella che lo aveva reso uguale a credential_verify(_portale)):
+  # stringa alfanumerica con almeno una lettera (ovunque nella stringa, non
+  # necessariamente in testa — maiuscola o minuscola indifferentemente) e
+  # almeno una cifra. Richiede regex_engine="python-re" nel modello (lookahead,
+  # non supportati dal motore Rust di default di Pydantic v2 — stesso motivo
+  # di credential_verify_portale.password_pattern).
+  login_pattern: '^(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]+$'
+  login_examples: ["A1B2C3", "12345X", "otp42"]
+  # Mostrato nell'app authenticator accanto al nome utente (provisioning_uri).
+  issuer_name: "DGT-MIT Servizio OTP"
+  # false (default): il metodo mail si attiva subito al setup (l'indirizzo
+  # arriva gia' validato dall'applicazione chiamante, non serve un secondo
+  # giro di conferma via codice). true: torna al flusso classico con un
+  # primo codice da confermare su /setup/confirm prima dell'attivazione.
+  require_mail_confirmation: false
+  # Tolleranza (in step da 30s) nella verifica del codice TOTP, per
+  # sfasamenti d'orologio tra server e app authenticator.
+  totp_valid_window: 1
+  # Quanto del codice OTP effettivo (il segreto con cui l'utente si
+  # autentica, non un hash) finisce nella colonna history.otp_requests.code:
+  #   0 (default) -> sempre "******", nessuna cifra reale salvata
+  #   1            -> mascherato con solo le ultime 2 cifre reali, es. "****13"
+  #   2            -> codice completo in chiaro, es. "482913"
+  # Il livello 2 salva il segreto 2FA in chiaro in una tabella di history:
+  # NON abilitarlo in produzione, solo per debug mirato e a tempo. All'avvio
+  # dell'app, se debug_code=2, viene emesso un log.warning esplicito.
+  debug_code: 1
+  # false (default, sicuro): nessun salvataggio su disco del QR OTP generato
+  # da /otp/setup (method='app'). true: ogni QR generato viene salvato (e
+  # sovrascritto ad ogni chiamata) in logging.dir/last_otp_qr.png, comodo per
+  # test manuali quando non si puo' visualizzare il base64 dalla risposta
+  # JSON. ATTENZIONE: quel file contiene lo stesso secret TOTP restituito nel
+  # campo "secret" della risposta — NON abilitarlo in produzione o in un
+  # ambiente condiviso, solo per test locali. All'avvio dell'app, se true,
+  # viene emesso un log.warning esplicito (stesso pattern di debug_code=2).
+  save_qr_to_disk: false
+
+postgres:
+  host: "<db-host>"
+  port: 5432
+  database: "<db-name>"
+  user: "<db-user>"
+  password: "<db-password>"
+  # min=1/max=3 per processo worker (era 5/10) — ogni worker gunicorn "sync"
+  # gestisce una sola richiesta alla volta e ogni funzione che tocca il DB
+  # apre/rilascia la propria connessione in modo sequenziale, mai annidato
+  # (verificato in app/controllers/*, app/services/otp_service.py): in
+  # nessun istante un worker ha più di 1 connessione realmente in uso. Il
+  # margine a 3 (invece di 1 secco) lascia respiro per un eventuale bug che
+  # tenga aperte 2 connessioni contemporaneamente senza rompere subito la
+  # richiesta. Con N worker gunicorn, il tetto massimo teorico di
+  # connessioni verso PostgreSQL è N×pool_max (es. 8 worker → 24, non più
+  # 80) — da tenere a mente se GUNICORN_WORKERS cambia.
+  pool_min: 1
+  pool_max: 3
+  pool_timeout: 30
+
+health:
+  performance_query: |
+    SELECT
+        numbackends                                        AS active_connections,
+        xact_commit                                        AS tx_committed,
+        xact_rollback                                      AS tx_rolled_back,
+        blks_read                                          AS blocks_read,
+        blks_hit                                           AS blocks_hit,
+        CASE WHEN (blks_read + blks_hit) > 0
+             THEN round(blks_hit::numeric /
+                        (blks_read + blks_hit) * 100, 2)
+             ELSE 100
+        END                                                AS cache_hit_ratio_pct,
+        tup_returned                                       AS rows_returned,
+        tup_fetched                                        AS rows_fetched,
+        tup_inserted                                       AS rows_inserted,
+        tup_updated                                        AS rows_updated,
+        tup_deleted                                        AS rows_deleted,
+        deadlocks                                          AS deadlocks,
+        temp_files                                         AS temp_files_created,
+        temp_bytes                                         AS temp_bytes_written
+    FROM pg_stat_database
+    WHERE datname = current_database()
+
+  connections_query: |
+    SELECT
+        COALESCE(state, 'unknown')  AS state,
+        COUNT(*)                    AS count
+    FROM pg_stat_activity
+    WHERE datname = current_database()
+    GROUP BY state
+    ORDER BY count DESC
+
+  db_stats_query: ""
+
+  # Login usata per il check di raggiungibilità SOAP in /health (password
+  # fittizia, hardcoded nel controller). ATTENZIONE: ogni chiamata a /health
+  # invia una richiesta REALE al servizio SOAP di terzi con questa login.
+  # Se possibile usare una login di test/monitoraggio fornita dal gestore del
+  # servizio esterno, non una login reale di un utente — chiamate ripetute e
+  # frequenti (es. da un monitoring automatico) generano tentativi di login
+  # falliti visibili lato loro.
+  soap_check_login: "<login-di-test>"
+
+soap:
+  endpoint_url: "<url-endpoint-soap>"
+  headers:
+    Content-Type: "text/xml"
+  verify_ssl: false
+  timeout_seconds: 30
+  template_file: "templates/checkuser.template.xml"
+  token_login: "<token-login>"
+  token_password: "<token-password>"
+  #auth_error_string: "Errore durante l'autenticazione"
+  auth_error_string1: "Errore durante l'autenticazione: matricola"
+  auth_error_string2: "Errore durante l'autenticazione: credenziali non valide"
+  auth_success:
+    - "Accesso negato, servizio non disponibile"
+
+operations_file: "app/config/operations.json"
+
+# Statement SQL usati dal flusso /credential/verify dopo che il servizio
+# SOAP esterno ha validato la password con successo (code "000"):
+#   1. select.checkcache: verifica se esiste gia' una riga per la login
+#   2. se esiste  -> update.updatecache (aggiorna password_hash,
+#      last_successful_login, client_request_id)
+#      se NON esiste -> insert.insertcache (login, password_hash,
+#      client_request_id)
+# NOTA: il campo/parametro si chiamava in origine remote_request_id,
+# rinominato in client_request_id (Python, JSON, E colonna DB
+# public.auth_credential_cache.client_request_id via ALTER TABLE) per non
+# confondersi con "remote" nel senso di "servizio SOAP esterno" (vedi
+# remote_response sotto) — verificato lo schema reale via query read-only,
+# la colonna in produzione si chiama gia' client_request_id.
+operations_sql:
+  select:
+    checkcache: "SELECT password_hash, next_working_day(last_successful_login::date,%(prov)s)::TIMESTAMP + INTERVAL '1 day' - INTERVAL '1 second'  AS expires_at FROM public.auth_credential_cache WHERE login = %(login)s"
+    # --- 2FA (otp2fa) ---
+    otp_service_account: "SELECT id FROM public.service_accounts WHERE isactive=true AND client=%(client_id)s AND passwd_hash = crypt(%(password)s, passwd_hash)"
+    otp_method_by_id: "SELECT id, login, method, secret, mail_to, status FROM public.otp_methods WHERE id=%(config_id)s"
+    # Riga purpose='register' (primo codice mail) per un config_id — usata da
+    # /otp/setup/confirm per applicare lo stesso controllo scadenza/stato gia'
+    # presente in _check_otp_code() per il flusso mail-login. Non richiede
+    # request_id dal client (il confirm non l'ha mai richiesto): un solo
+    # codice di registrazione 'pending' atteso per config_id (invariante del
+    # flusso attuale, un solo invio per ogni /otp/setup con conferma).
+    otp_request_by_config: "SELECT id, status, CASE WHEN now() <= expires_at THEN 1 ELSE 0 END AS not_expired FROM history.otp_requests WHERE config_id=%(config_id)s AND purpose='register' ORDER BY id DESC LIMIT 1"
+    otp_active_method: "SELECT id, login, method, secret, counter, mail_to, status, last_totp_step FROM public.otp_methods WHERE login=%(login)s AND status='active' ORDER BY id DESC LIMIT 1"
+    otp_mail_template: "SELECT id, subject, body, mailserver, portmailserver, sender_email, timeout_seconds FROM config.mail_templates WHERE id=%(template_id)s AND isactive=true"
+    otp_request_by_id: "SELECT id, counter_used, status, CASE WHEN now() <= expires_at THEN 1 ELSE 0 END AS not_expired FROM history.otp_requests WHERE id=%(request_id)s AND config_id=%(config_id)s AND login=%(login)s"
+    otp_login_status: "SELECT status, method FROM public.otp_methods WHERE login=%(login)s ORDER BY id DESC LIMIT 1"
+  update:
+    updatecache: "UPDATE public.auth_credential_cache SET password_hash=%(password_hash)s ,last_successful_login=now(), client_request_id=%(client_request_id)s WHERE login = %(login)s"
+    auth_credential_log_tcp: "UPDATE history.auth_credential_log set connection_tcp=%(tcpcheck)s, updated_at=now() , score=2,failure_reason=%(failure_reason)s, response=%(response)s, elapsed_time=EXTRACT(EPOCH FROM (now() - login_at)) * 1000 WHERE id=%(auth_credential_log_id)s"
+    auth_credential_log_extop: "UPDATE history.auth_credential_log set remote_response=%(remote_response)s, updated_at=now() , score=3, elapsed_time=EXTRACT(EPOCH FROM (now() - login_at)) * 1000 WHERE id=%(auth_credential_log_id)s"
+    auth_credential_log_end: "UPDATE history.auth_credential_log set auth_validation=%(auth_validation)s, success=%(success)s,failure_reason=%(failure_reason)s ,updated_at=now() , score=9, response=%(response)s, code=%(code)s, elapsed_time=EXTRACT(EPOCH FROM (now() - login_at)) * 1000 WHERE id=%(auth_credential_log_id)s"
+    # --- 2FA (otp2fa) ---
+    otp_service_account_last_used: "UPDATE public.service_accounts SET last_used_at=now() WHERE client=%(client_id)s"
+    # otp_method_disable_active: usata ora solo da POST /otp/disable — l'attivazione
+    # (/otp/setup, /otp/setup/confirm) NON disattiva piu' un metodo attivo preesistente:
+    # e' bloccata a monte da handle_otp_setup() se ne esiste gia' uno (vedi CLAUDE.md).
+    otp_method_disable_active: "UPDATE public.otp_methods SET status='disabled', disabled_at=now(), requested_by_login=%(requested_by_login)s WHERE login=%(login)s AND status='active' RETURNING id, method"
+    otp_method_activate: "UPDATE public.otp_methods SET status='active', confirmed_at=now() WHERE id=%(config_id)s"
+    otp_method_counter: "UPDATE public.otp_methods SET counter=%(new_counter)s WHERE id=%(config_id)s"
+    # Anti-replay TOTP: UPDATE condizionale, solo se step e' maggiore del
+    # valore gia' salvato (o assente) — non regredisce su richieste fuori
+    # ordine (es. per via di clock skew fra offset diversi della finestra).
+    # RETURNING id: rende la scrittura anche il check atomico (compare-and-swap
+    # lato DB) — nessuna riga restituita = la condizione non era piu' vera nel
+    # momento esatto della scrittura, es. un'altra richiesta concorrente ha
+    # gia' consumato questo step. _check_otp_code() in otp_controller.py usa
+    # l'esito di QUESTA query per decidere il replay, non piu' un confronto
+    # fatto in Python su un valore letto separatamente in anticipo.
+    otp_method_totp_step: "UPDATE public.otp_methods SET last_totp_step=%(step)s WHERE id=%(config_id)s AND (last_totp_step IS NULL OR last_totp_step < %(step)s) RETURNING id"
+    otp_request_status: "UPDATE history.otp_requests SET status=%(new_status)s, verified_at=now() WHERE id=%(id)s"
+    otp_request_verify_register: "UPDATE history.otp_requests SET status='verified', verified_at=now() WHERE config_id=%(config_id)s AND purpose='register' AND status='pending'"
+
+  insert:
+    insertcache: "INSERT INTO public.auth_credential_cache (login,password_hash, client_request_id, created_at) VALUES (%(login)s,%(password_hash)s, %(client_request_id)s, NOW()) RETURNING id"
+    auth_credential_log: "INSERT INTO history.auth_credential_log (login, login_at, request_id,auth_type,success,score,service,request,client) VALUES (%(login)s,now(),%(client_request_id)s,%(auth_type)s, 0,%(score)s,%(service)s,%(request)s,%(client)s) RETURNING id"
+    # --- 2FA (otp2fa) ---
+    otp_method: "INSERT INTO public.otp_methods (login, method, secret, counter, mail_to, status, created_at) VALUES (%(login)s,%(method)s,%(secret)s,0,%(mail_to)s,'pending', now()) RETURNING id"
+    otp_method_active: "INSERT INTO public.otp_methods (login, method, secret, counter, mail_to, status, created_at, confirmed_at) VALUES (%(login)s,%(method)s,%(secret)s,0,%(mail_to)s,'active', now(), now()) RETURNING id"
+    # expires_at ora e' calcolata in Python PRIMA dell'invio mail (stesso
+    # valore usato per {{EXPIRES_AT}} nel body), non piu' un now()+interval
+    # calcolato qui DOPO l'invio SMTP (poteva disallinearsi di qualche secondo
+    # da quanto mostrato all'utente).
+    otp_request: "INSERT INTO history.otp_requests (config_id, login, purpose, counter_used, request_id, client, code, status, created_at, expires_at) VALUES (%(config_id)s,%(login)s,%(purpose)s,%(counter_used)s,%(request_id)s,%(client_id)s,%(code)s,'pending', now(), %(expires_at)s) RETURNING id"
+    # Log di un tentativo di verifica TOTP (metodo app) su /otp/verify o
+    # /otp/disable — a differenza di otp_request sopra, qui lo stato finale
+    # (verified/failed) e' gia' noto al momento dell'insert, niente 'pending'
+    # e niente expires_at (nessun invio, nessuna scadenza da tracciare).
+    otp_request_verify: "INSERT INTO history.otp_requests (config_id, login, purpose, request_id, client, code, status, created_at, verified_at) VALUES (%(config_id)s,%(login)s,'verify',%(request_id)s,%(client_id)s,%(code)s,%(status)s, now(), now()) RETURNING id"

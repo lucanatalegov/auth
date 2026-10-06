@@ -97,7 +97,7 @@ otp2fa:
   # arriva gia' validato dall'applicazione chiamante, non serve un secondo
   # giro di conferma via codice). true: torna al flusso classico con un
   # primo codice da confermare su /setup/confirm prima dell'attivazione.
-  require_mail_confirmation: false
+  require_mail_confirmation: true
   # Tolleranza (in step da 30s) nella verifica del codice TOTP, per
   # sfasamenti d'orologio tra server e app authenticator.
   totp_valid_window: 1

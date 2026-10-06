@@ -28,6 +28,7 @@ import json
 import logging
 import time
 
+import pytz
 from flask import g
 
 from app.services.soap_service import call_credential_verify_soap, check_soap_listening
@@ -35,6 +36,11 @@ from app.utils.db_pool import get_pg_connection, release_pg_connection
 from app.utils.security import hash_password, mask_password
 
 log = logging.getLogger("authapi.controller.credential_verify")
+
+# Fuso della sessione PostgreSQL (Europe/Rome): checkcache restituisce
+# expires_at come ::TIMESTAMP naive in ora locale del DB, mentre il
+# container gira in UTC — un datetime.now() naive sarebbe sfasato di 1-2h.
+_DB_TZ = pytz.timezone("Europe/Rome")
 
 # ------------------------------------------------------------------
 # Mappatura dei code del fallback su cache (_try_cache_fallback):
@@ -519,10 +525,13 @@ def _try_cache_fallback(cfg: dict, login: str, password_hash: str, prov: str,
         else:
             # expires_at arriva senza timezone (la query in config.yaml fa
             # un cast ::TIMESTAMP, non ::TIMESTAMPTZ su un'espressione che
-            # parte da una colonna timestamptz): confronto con un now()
-            # locale altrettanto naive, coerente col fuso del server
-            # PostgreSQL che ha calcolato il valore.
-            now = datetime.datetime.now()
+            # parte da una colonna timestamptz): e' in ora locale del DB
+            # (_DB_TZ), non del container (UTC). Confronto fra datetime
+            # aware; se in futuro la query restituisse un timestamptz,
+            # resta corretto senza modifiche.
+            if expires_at.tzinfo is None:
+                expires_at = _DB_TZ.localize(expires_at)
+            now = datetime.datetime.now(datetime.timezone.utc)
             if now < expires_at:
                 valid = True
             else:

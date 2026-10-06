@@ -22,11 +22,18 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 import pyotp
+import pytz
 import qrcode
 
 from app.services.soap_service import check_tcp_listening
 from app.utils.db_pool import get_pg_connection, release_pg_connection
 from app.utils.logger import _resolve_log_dir
+
+# Fuso orario con cui {{EXPIRES_AT}} viene mostrato nella mail. expires_at
+# arriva timezone-aware (UTC) dal controller: il container gira in UTC, un
+# datetime naive verrebbe interpretato da Postgres nel fuso della sessione
+# (Europe/Rome) e il codice risulterebbe gia' scaduto al momento dell'invio.
+_MAIL_TZ = pytz.timezone("Europe/Rome")
 
 log = logging.getLogger("authapi.service.otp")
 
@@ -155,7 +162,7 @@ def send_otp_mail(template: dict, login: str, mail_to: str, otp_code: str, expir
     body = body.replace("{{LOGIN}}", login)
     body = body.replace("{{OTP}}", otp_code)
     body = body.replace("{{TIMEOUT_MINUTES}}", str(int(int(template["timeout_seconds"]) / 60)))
-    body = body.replace("{{EXPIRES_AT}}", expires_at.strftime("%d/%m/%Y %H:%M"))
+    body = body.replace("{{EXPIRES_AT}}", expires_at.astimezone(_MAIL_TZ).strftime("%d/%m/%Y %H:%M"))
 
     message = MIMEMultipart("alternative")
     message["Subject"] = template["subject"]

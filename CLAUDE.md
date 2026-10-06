@@ -696,7 +696,7 @@ app / HOTP mail". Punti che *non* vanno riderivati dal codice:
 (rivelato dall'utente a metà sessione — il file **realmente usato in produzione**,
 non nel repo fino ad allora). Stack multi-servizio: `authmanager` (nginx, pubblica
 `5005:80`, monta `api.conf`), `oldotpapi`, `robot4meV1api1` (script Python legacy),
-`auth-api` (`image: auth-api:v1.2.1`, porta reale **3000**, `ports: "3002:3000"`,
+`auth-api` (`image: auth-api:v1.2.2`, porta reale **3000**, `ports: "3002:3000"`,
 rete esterna Swarm `produzione`). Nessuna sezione `build:` — solo `image:`. Per
 qualunque modifica destinata alla produzione reale, il file da editare è
 **`docker-compose-prod.yaml`**, non `docker-compose.yml` — un fix fatto solo su
@@ -710,7 +710,7 @@ entrambi da tenere funzionanti:
   l'immagine al volo dalla sezione `build:`.
 - `docker stack deploy -c docker-compose.yml <stack>` sul cluster Swarm a 5 nodi —
   **non builda mai**: Swarm ignora `build:` con un warning e si aspetta che
-  l'immagine (`${IMAGE_NAME:-auth-api}:${VERSION_TAG:-v1.2.1}`) esista già in
+  l'immagine (`${IMAGE_NAME:-auth-api}:${VERSION_TAG:-v1.2.2}`) esista già in
   locale su ciascun nodo. Il comando reale usato dall'utente per attivare lo stack
   è `docker stack deploy -c <file-compose> <service>` (non `docker compose`).
 
@@ -815,6 +815,55 @@ richieste alla volta, N = numero di worker.
   interrogare `pg_stat_activity`); sotto 20 richieste concorrenti, picco
   osservato 6 connessioni `active` / 8 totali — mai vicino al nuovo tetto
   teorico di `8 worker × pool_max:3 = 24` (era `8×10=80` prima del fix).
+
+## Fuso orario — container UTC vs PostgreSQL Europe/Rome (sessione 2026-10-06)
+
+⚠️ **Il container Docker gira in UTC, la sessione PostgreSQL (`SHOW timezone`) è
+`Europe/Rome`, l'host (`run.py` in locale) è in CEST.** Un `datetime.now()` naive
+in Python vale quindi ora locale in sviluppo ma UTC in produzione: un bug di fuso
+non si riproduce mai lanciando `run.py` sull'host, solo nel container.
+
+Bug reale trovato in produzione: **ogni OTP via mail nasceva già scaduto**.
+`expires_at` era calcolata in `otp_controller.py` con `datetime.now()` naive (UTC
+nel container) e passata a `INSERT ... expires_at` (colonna `timestamptz`):
+Postgres la interpretava nel fuso di sessione, quindi 13:11 UTC → 13:11+02 → circa
+2h nel passato rispetto a `created_at`. Effetto: `code:"010"` (scaduto) su
+`/otp/verify`, `/otp/disable` e `/otp/setup/confirm` per il metodo `mail`, a
+pochi secondi dall'invio; anche `{{EXPIRES_AT}}` nella mail mostrava l'ora UTC.
+Metodo `app` (TOTP) non coinvolto. Verificato su `history.otp_requests` (id 22/23,
+login P014452): `expires_at < created_at`. Le 3 verifiche mail riuscite di agosto
+erano state fatte con `run.py` sull'host, prima del passaggio al container.
+
+Correzioni, nessuna modifica a query/config:
+- `otp_controller.py` (setup, sendmailotp, requestotp): `expires_at =
+  datetime.now(timezone.utc) + timedelta(...)`, cioè un datetime con fuso
+  esplicito, che psycopg2 passa con l'offset corretto.
+- `otp_service.py::send_otp_mail()`: `{{EXPIRES_AT}}` formattato con
+  `expires_at.astimezone(_MAIL_TZ)` (`pytz` `Europe/Rome`, stesso approccio di
+  `app/utils/logger.py::_ROME_TZ`).
+- `credential_verify_controller.py::_try_cache_fallback()`: stesso tipo di bug,
+  sul lato opposto (in permissivo invece che restrittivo). `checkcache` restituisce
+  `expires_at` come `::TIMESTAMP` naive in ora di Roma, confrontato con un
+  `datetime.now()` naive UTC: la cache restava valida circa 2h oltre la mezzanotte
+  prevista. Ora `expires_at` naive viene localizzato con `_DB_TZ`
+  (`Europe/Rome`) e confrontato con `datetime.now(timezone.utc)`; se in futuro la
+  query restituisse un `timestamptz`, il confronto resta corretto senza modifiche.
+
+Verificati e **già corretti** (controllo su tutto il codice, stessa sessione):
+`otp_service.py::verify_totp_with_step()` (con un datetime naive `pyotp.TOTP.timecode()`
+usa `time.mktime()`, cioè il fuso locale del processo, coerente con `datetime.now()`),
+`last_successful_login` (già `now(timezone.utc)`), `logger.py`, tutte le scadenze
+calcolate lato SQL con `now()`.
+
+**Regola per il futuro**: niente `datetime.now()` naive per valori che finiscono
+nel DB o vengono confrontati con valori del DB. Usare `datetime.now(timezone.utc)`,
+e localizzare esplicitamente (`Europe/Rome`) ogni timestamp naive letto dal DB.
+
+⚠️ `otp2fa.require_mail_confirmation` è stato portato a `true` dall'utente nella
+stessa sessione: anche il percorso `/otp/setup` (mail) → `/otp/setup/confirm` usa
+quindi un codice con scadenza, e fallisce con `010` finché la correzione sopra
+non è distribuita (`./build.sh` + `docker stack deploy`: sia il codice sia
+`config.yaml` sono dentro l'immagine).
 
 ## Comandi utili
 

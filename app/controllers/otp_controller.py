@@ -33,7 +33,7 @@
 
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from flask import g
 
@@ -656,7 +656,7 @@ def handle_otp_setup(cfg: dict, login: str, method: str, template_id: int | None
     # Calcolata PRIMA dell'invio: stesso valore mostrato nella mail
     # ({{EXPIRES_AT}}) e salvato su history.otp_requests, nessun ricalcolo
     # successivo che potrebbe disallinearsi (vedi _insert_otp_request()).
-    expires_at = datetime.now() + timedelta(seconds=int(template["timeout_seconds"]))
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(template["timeout_seconds"]))
     sent = otp_service.send_otp_mail(template, login, mail_to, otp_code, expires_at)
     if not sent:
         return {"message": "Il server di posta e' down", "code": "300", "elapsed_time": _elapsed(t0)}, 412
@@ -772,7 +772,7 @@ def handle_otp_sendmailotp(cfg: dict, login: str, template_id: int, client_reque
 
     # Calcolata PRIMA dell'invio, stesso valore per mail e DB — vedi nota in
     # _insert_otp_request() e nel ramo "register" di handle_otp_setup().
-    expires_at = datetime.now() + timedelta(seconds=int(template["timeout_seconds"]))
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(template["timeout_seconds"]))
     sent = otp_service.send_otp_mail(template, login, active["mail_to"], otp_code, expires_at)
     if not sent:
         return {"message": "Il server di posta e' down", "code": "300", "elapsed_time": _elapsed(t0)}, 412
@@ -869,7 +869,7 @@ def handle_otp_requestotp(cfg: dict, login: str, template_id: int, mail_to: str,
     new_counter = int(active["counter"]) + 1
     otp_code = otp_service.hotp_code(active["secret"], new_counter)
 
-    expires_at = datetime.now() + timedelta(seconds=int(template["timeout_seconds"]))
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(template["timeout_seconds"]))
     sent = otp_service.send_otp_mail(template, login, active["mail_to"], otp_code, expires_at)
     if not sent:
         return {"message": "Il server di posta e' down", "code": "300", "elapsed_time": _elapsed(t0)}, 412

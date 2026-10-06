@@ -1,4 +1,4 @@
-# Auth API — v1.2.1
+# Auth API — v1.2.2
 
 Web service REST di autenticazione con Flask e OpenAPI.
 
@@ -7,7 +7,7 @@ Web service REST di autenticazione con Flask e OpenAPI.
 |-------|--------|---------------|
 | Release | v1 | `./release` o `config.yaml` |
 | Patch   | 2  | `./patch` o `config.yaml`  |
-| Build   | 1  | `./version` — auto-incrementato |
+| Build   | 2  | `./version` — auto-incrementato |
 
 ## Installazione
 ```bash
@@ -340,7 +340,10 @@ scatta **solo** quando il SOAP non riesce a dare una risposta definitiva — TCP
 chiamata SOAP tentata: fallirebbe comunque sullo stesso check al suo interno) oppure
 raggiungibile ma con `code` diverso sia da `000` sia da `500`. **Sola lettura**: rilegge
 `select.checkcache` (stessa query della sync sopra) e confronta l'hash appena calcolato con
-`password_hash` in cache, verificando `now() < expires_at`. Se valido, autentica comunque
+`password_hash` in cache, verificando `now() < expires_at`. `expires_at` arriva dalla query
+come timestamp senza fuso in ora di Roma (fuso della sessione PostgreSQL): il codice lo
+localizza in `Europe/Rome` e lo confronta con l'ora corrente in UTC, così il risultato non
+dipende dal fuso del container (vedi "Fuso orario" in fondo). Se valido, autentica comunque
 l'utente (`code="000"`); altrimenti nega con uno dei code `1001`–`2004` visti sopra.
 **Non scrive mai** su `public.auth_credential_cache` (né `updatecache` né `insertcache`),
 riuscito o negato che sia — solo il log storico (sotto) viene aggiornato.
@@ -670,6 +673,12 @@ sopra), mai il codice reale in chiaro per default. Colonna `client`: applicativo
 | | | | `/otp/verify` o `/otp/disable` — codice verificato | `verified` o `failed` | One-shot: un tentativo (giusto o sbagliato) chiude la riga |
 | **`verify`**<br>(app, `/otp/verify` o `/otp/disable`) | insert in `_check_otp_code()` | **già** `verified` o `failed` | — | — | Mai `pending`: TOTP non ha un "invio" precedente (il codice lo genera l'authenticator, non lo mandiamo noi) — ogni tentativo crea una riga nuova, già chiusa, mai aggiornata dopo |
 
+`expires_at` (righe mail) = istante dell'invio + `config.mail_templates.timeout_seconds`,
+calcolato una sola volta in Python, in UTC con fuso esplicito, prima dell'invio. Lo stesso
+valore compare nella mail (placeholder `{{EXPIRES_AT}}`, mostrato in ora italiana,
+`gg/mm/aaaa hh:mm`). Fino al 2026-10-06 era un `datetime.now()` senza fuso: nel container
+(UTC) ogni codice mail nasceva già scaduto (`code:"010"`), vedi "Fuso orario" in fondo.
+
 In sintesi: per `register`/`login` (mail) lo status segue `pending → verified/failed/expired`,
 con **al massimo un** aggiornamento — dopo, la riga è bruciata (ogni riverifica trova
 `≠ pending` → `240`). Per `verify` (app) non c'è ciclo: ogni chiamata crea direttamente una
@@ -845,3 +854,22 @@ restart del container con l'immagine già presente sul nodo. Per verificare
 quale config sia realmente attiva senza dover interrogare PostgreSQL
 direttamente, `GET /health` espone `pool_min`/`pool_max` nel campo
 `postgres` della risposta.
+
+### Fuso orario — container UTC, PostgreSQL Europe/Rome
+
+Il container gira in **UTC**, la sessione PostgreSQL è in **`Europe/Rome`**, l'host
+(`python run.py` in locale) è in ora italiana. Un `datetime.now()` senza fuso in Python
+vale quindi ora locale in sviluppo e UTC in produzione: i bug di fuso orario si vedono
+solo nel container.
+
+Regola applicata nel codice (correzione del 2026-10-06):
+- i valori scritti nel DB o confrontati con valori del DB usano `datetime.now(timezone.utc)`;
+- i timestamp senza fuso letti dal DB (es. `expires_at` di `checkcache`) vengono
+  localizzati esplicitamente in `Europe/Rome`;
+- gli orari mostrati all'utente (es. `{{EXPIRES_AT}}` nella mail) e i log vengono
+  convertiti in `Europe/Rome`.
+
+Bug corretti con questa regola: OTP via mail sempre scaduto (`code:"010"` su
+`/otp/verify`, `/otp/disable`, `/otp/setup/confirm` per il metodo `mail`) e cache di
+`/credential/verify` valida circa 2 ore oltre il previsto. Il metodo `app` (TOTP) non era
+coinvolto.

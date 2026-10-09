@@ -145,7 +145,7 @@ def _check_soap_login(cfg: dict) -> dict:
         result["wsdlresponse"] = soap_res.get("wsdlresponse")
         result["status"]       = "DOWN" if soap_res.get("code") == "700" else "UP"
         log.info(f"Health SOAP: {result['status']}",
-                 extra={"elapsed_ms": result["elapsed_ms"], "code": result["code"]})
+                 extra={"soap_check_ms": result["elapsed_ms"], "code": result["code"]})
     except Exception as exc:
         result["elapsed_ms"] = round((time.perf_counter() - t) * 1000, 2)
         result["error"]      = str(exc)

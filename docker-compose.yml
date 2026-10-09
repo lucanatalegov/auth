@@ -60,7 +60,7 @@ services:
     # nodo da build.sh (docker load); se il pull dal registry di default
     # (Docker Hub) fallisce, Swarm ricade sulla cache locale del nodo, per
     # questo il tag DEVE già esistere lì prima del deploy.
-    image: "${IMAGE_NAME:-auth-api}:${VERSION_TAG:-v1.2.2}"
+    image: "${IMAGE_NAME:-auth-api}:${VERSION_TAG:-v1.2.3}"
     ports:
       - "${PORT:-3002}:${PORT:-3002}"
     volumes:

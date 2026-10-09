@@ -114,7 +114,7 @@ services:
             restart_policy:
                 condition: on-failure
     auth-api:
-        image: auth-api:v1.2.2
+        image: auth-api:v1.2.3
         ports:
             - "3002:3000"
         # Sovrascrive il CMD del Dockerfile (gunicorn --workers 4 fisso) senza

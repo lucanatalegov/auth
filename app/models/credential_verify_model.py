@@ -17,6 +17,7 @@
 from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
 
 from app.utils.security import apply_password_case
+from app.utils.request_context import CLIENT_REQUEST_ID_MAX_LENGTH, CLIENT_SESSION_ID_MAX_LENGTH
 
 _DEFAULT_LOGIN_PATTERN    = r"^(EE[A-Z]{2}[0-9]{5}|P0[0-9]{4,5}|AG[A-Z]{2}[0-9]{6})$"
 _DEFAULT_LOGIN_EXAMPLES   = ["EEAB12345", "P012345", "AGAB123456"]
@@ -92,12 +93,19 @@ def build_credential_verify_models(cfg: dict) -> tuple[type[BaseModel], type[Bas
         )),
         client_request_id=(str | None, Field(
             None,
+            max_length=CLIENT_REQUEST_ID_MAX_LENGTH,
             description=(
                 "Identificativo fornito dal client chiamante, salvato nella "
                 "cache di login in caso di validazione riuscita (code=000). "
                 "Se assente, viene usato \"none\"."
             ),
             examples=["client-correlation-id-123"],
+        )),
+        client_session_id=(str | None, Field(
+            None,
+            max_length=CLIENT_SESSION_ID_MAX_LENGTH,
+            description="Id di sessione del client (facoltativo, solo per i log applicativi: campo session_id).",
+            examples=["client-session-456"],
         )),
     )
 

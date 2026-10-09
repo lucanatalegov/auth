@@ -865,6 +865,29 @@ quindi un codice con scadenza, e fallisce con `010` finché la correzione sopra
 non è distribuita (`./build.sh` + `docker stack deploy`: sia il codice sia
 `config.yaml` sono dentro l'immagine).
 
+## Log applicativo — formato e regole (v1.2.3, sessione 2026-10-09)
+
+Dettaglio in `README.md`, sezione Logging. Punti non ovvi:
+- **Rotazione multi-processo**: `ConcurrentRotatingFileHandler` (`concurrent-log-handler`),
+  non `RotatingFileHandler` — con 8 worker gunicorn sullo stesso file quest'ultimo
+  perdeva righe a ogni rotazione. File di lock `.__api-auth.lock` accanto al log.
+- **Campi fissi** di ogni riga: `asctime` (ms, Europe/Rome), `level`, `process_id`
+  (PID worker), `thread_name`, `thread_id`, `logger`, `file` (path relativo alla root),
+  `module`, `function`, `line`, `request_id`, `application`, `session_id`, `elapsed_ms`,
+  `message`, `context` (gli `extra`).
+- **`request_id`**: `client_request_id` (body/query) → header `X-Request-Id` → UUID4.
+  L'header originale resta in `context.x_request_id` della riga d'ingresso.
+- **`application`**: header `X-Application` → utente Basic Auth (letto PRIMA della
+  verifica password) → null. `X-Application` facoltativo (`ApplicationHeader`,
+  `app/models/common_model.py`), non dichiarato su `/health`.
+- **`session_id`**: `client_session_id` (body/query), nessun fallback. Solo log, mai DB.
+- `client_request_id`/`client_session_id`/`X-Application`: max 100 caratteri (422 se nel
+  body/query; gli header vengono troncati, non rifiutati).
+- **`elapsed_ms`**: 0 salvo "HTTP response inviata" (tempo totale), risposta/eccezione
+  SOAP (solo la chiamata HTTP) e check TCP. SMTP non misurato.
+- **Mascheramento** nei body loggati: `password`, `secret`, `qr_code_base64` ovunque;
+  `code` solo nelle richieste `/otp/*` (nelle risposte è l'esito).
+
 ## Comandi utili
 
 ```bash

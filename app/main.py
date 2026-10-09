@@ -31,6 +31,7 @@ from app.controllers.otp_controller import (
 from app.controllers.credential_verify_controller import handle_credential_verify
 from app.controllers.credential_verify_portale_controller import handle_credential_verify_portale
 from app.middleware import register_middleware
+from app.models.common_model import ApplicationHeader
 from app.models.health_model import HealthQuery, HealthResponse
 from app.models.otp_model import (
     OtpConfirmRequest,
@@ -174,7 +175,7 @@ def create_app(config_path: str = None) -> OpenAPI:
               })
     #@limiter.limit(credential_verify_portale_limit)
     @require_service_account(cfg)
-    def credential_verify_portale(body: CredentialVerifyPortaleRequest):
+    def credential_verify_portale(body: CredentialVerifyPortaleRequest, header: ApplicationHeader):
         """
         Autentica tramite SOAP. Richiede HTTP Basic Auth applicativa (stesso
         meccanismo di `/otp/*`, `public.service_accounts`) — identifica
@@ -209,7 +210,7 @@ def create_app(config_path: str = None) -> OpenAPI:
               })
     #@limiter.limit(credential_verify_limit)
     @require_service_account(cfg)
-    def credential_verify(body: CredentialVerifyRequest):
+    def credential_verify(body: CredentialVerifyRequest, header: ApplicationHeader):
         """
         Autentica tramite SOAP; se il servizio esterno non riesce a dare una risposta
         definitiva, tenta un fallback su cache locale. Richiede HTTP Basic Auth
@@ -295,7 +296,7 @@ def create_app(config_path: str = None) -> OpenAPI:
                         "content": {"application/json": {"schema": _validation_error_schema}}},
               })
     @require_service_account(cfg)
-    def otp_setup(body: OtpSetupRequest):
+    def otp_setup(body: OtpSetupRequest, header: ApplicationHeader):
         """
         Registra un metodo 2FA per **login** (matricola dell'utente reale,
         non l'applicativo autenticato via Basic Auth).
@@ -327,7 +328,7 @@ def create_app(config_path: str = None) -> OpenAPI:
                        "content": {"application/json": {"schema": _validation_error_schema}}},
              })
     @require_service_account(cfg)
-    def otp_setup_confirm(body: OtpConfirmRequest):
+    def otp_setup_confirm(body: OtpConfirmRequest, header: ApplicationHeader):
         """
         Verifica il primo codice (`config_id` restituito da `/otp/setup`) e
         attiva il metodo. Per `method='mail'`, applica anche il controllo di
@@ -355,7 +356,7 @@ def create_app(config_path: str = None) -> OpenAPI:
                         "content": {"application/json": {"schema": _validation_error_schema}}},
               })
     @require_service_account(cfg)
-    def otp_sendmailotp(body: OtpSendMailRequest):
+    def otp_sendmailotp(body: OtpSendMailRequest, header: ApplicationHeader):
         """
         Invia un nuovo codice HOTP via mail per `login` (deve avere un metodo
         `mail` attivo). `template_id` e' obbligatorio ad ogni chiamata: il
@@ -380,7 +381,7 @@ def create_app(config_path: str = None) -> OpenAPI:
                         "content": {"application/json": {"schema": _validation_error_schema}}},
               })
     @require_service_account(cfg)
-    def otp_requestotp(body: OtpRequestOtpRequest):
+    def otp_requestotp(body: OtpRequestOtpRequest, header: ApplicationHeader):
         """
         Endpoint di retrocompatibilita' per sistemi legacy che non conoscono
         ancora il flusso separato `/otp/setup` + `/otp/sendmailotp`: una sola
@@ -427,7 +428,7 @@ def create_app(config_path: str = None) -> OpenAPI:
                         "content": {"application/json": {"schema": _validation_error_schema}}},
               })
     @require_service_account(cfg)
-    def otp_verify(body: OtpVerifyRequest):
+    def otp_verify(body: OtpVerifyRequest, header: ApplicationHeader):
         """
         Verifica il codice OTP per `login`. `request_id` (restituito da
         `/otp/sendmailotp`) e' obbligatorio solo per il metodo `mail`.
@@ -451,7 +452,7 @@ def create_app(config_path: str = None) -> OpenAPI:
                        "content": {"application/json": {"schema": _validation_error_schema}}},
              })
     @require_service_account(cfg)
-    def otp_status(query: OtpStatusQuery):
+    def otp_status(query: OtpStatusQuery, header: ApplicationHeader):
         """
         Stato dell'**ultima** configurazione 2FA per `login`, qualunque sia
         il suo `status` (`pending`/`active`/`disabled`) — non solo quella
@@ -480,7 +481,7 @@ def create_app(config_path: str = None) -> OpenAPI:
                         "content": {"application/json": {"schema": _validation_error_schema}}},
               })
     @require_service_account(cfg)
-    def otp_disable(body: OtpDisableRequest):
+    def otp_disable(body: OtpDisableRequest, header: ApplicationHeader):
         """
         Disattiva il metodo 2FA attivo di `login`. L'OTP e' **sempre** richiesto:
 

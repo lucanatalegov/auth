@@ -24,6 +24,7 @@ logging:
   dir: "/var/log/mit4me/auth"
   # Nome del file di log
   filename: "api-auth.log"
+  # Rotazione sicura fra worker gunicorn (concurrent-log-handler)
   max_bytes: 5242880
   backup_count: 5
   # Se false, disabilita la scrittura dei log su stdout/console

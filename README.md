@@ -1,4 +1,4 @@
-# Auth API — v1.2.2
+# Auth API — v1.2.3
 
 Web service REST di autenticazione con Flask e OpenAPI.
 
@@ -7,7 +7,7 @@ Web service REST di autenticazione con Flask e OpenAPI.
 |-------|--------|---------------|
 | Release | v1 | `./release` o `config.yaml` |
 | Patch   | 2  | `./patch` o `config.yaml`  |
-| Build   | 2  | `./version` — auto-incrementato |
+| Build   | 3  | `./version` — auto-incrementato |
 
 ## Installazione
 ```bash
@@ -38,7 +38,7 @@ auth-openapi3_v1_p2_v1/
 ├── main.py / run.py / requirements.txt
 ├── release / patch / version
 ├── README.md / SUMMARY.md
-├── logs/api-auth.log          # JSON strutturato, RotatingFileHandler
+├── logs/api-auth.log          # JSON strutturato, ConcurrentRotatingFileHandler
 ├── templates/checkuser.template.xml
 ├── sql/otp_2fa_schema.sql     # DDL 2FA — da eseguire una tantum (non applicato dal codice)
 └── app/
@@ -78,7 +78,7 @@ auth-openapi3_v1_p2_v1/
     │   └── otp_service.py       # pyotp (TOTP/HOTP) + QR base64 + invio mail (smtplib, riusa
     │                             # check_tcp_listening) + authenticate_service_account() (pgcrypto)
     └── utils/
-        ├── logger.py            # JsonFormatter + requestid
+        ├── logger.py            # JsonFormatter + request_id
         ├── request_context.py   # X-Request-Id filter
         ├── db_pool.py            # Pool PostgreSQL con getter
         ├── security.py          # mask_password() + hash_password() + apply_password_case()
@@ -87,37 +87,91 @@ auth-openapi3_v1_p2_v1/
 
 ---
 
-## Logging — configurazione (build 1)
+## Logging — configurazione
 
 ```yaml
 logging:
   level: "DEBUG"
-  dir: "logs"                    # path relativo o assoluto (es. "/var/log/sportello")
+  dir: "/var/log/mit4me/auth"    # path relativo alla root o assoluto
   filename: "api-auth.log"       # nome del file di log
-  max_bytes: 5242880
-  backup_count: 10
+  max_bytes: 5242880             # rotazione oltre 5 MB
+  backup_count: 5                # file ruotati conservati
   console_enabled: true          # false = disabilita lo stdout
 ```
 
-### X-Request-Id
+### Rotazione — `concurrent-log-handler`
 
-Ogni richiesta HTTP può includere l'header `X-Request-Id`. Se presente, il
-suo valore viene incluso in **ogni** riga di log emessa durante l'elaborazione
-di quella richiesta, sotto la chiave `"requestid"`. Se l'header non è
-presente, il server ne genera uno automaticamente (UUID4).
+Con più worker gunicorn sullo stesso file, `RotatingFileHandler` faceva ruotare il file
+a ogni processo per conto proprio: righe perse e worker che continuavano a scrivere sul
+file già ruotato. Ora l'app usa `ConcurrentRotatingFileHandler` (pacchetto
+`concurrent-log-handler`), che coordina scritture e rotazione fra i processi con un file
+di lock (`.__api-auth.lock`, nella stessa cartella del log). Stessi parametri di prima:
+`max_bytes` (dimensione oltre la quale il file ruota) e `backup_count` (file ruotati
+conservati).
 
-L'header viene anche restituito nella risposta HTTP, per permettere al
-client di correlare i propri log con quelli del server.
+### Mascheramento dei body nel log
 
-```
-POST /mit4me/auth/api/v1/credential/verify-portale
-X-Request-Id: 24dc894f-9d46-400d-a431-da5c6afde458
-```
+Il middleware registra i body di richiesta e risposta (`req_body`/`resp_body`, max 2000
+caratteri, troncati **dopo** il mascheramento). Nei body JSON vengono sostituiti con
+`********`, a qualunque livello di annidamento:
+- `password` (tutti gli endpoint);
+- `secret` e `qr_code_base64` (risposta di `/otp/setup` con `method=app`: il QR contiene
+  lo stesso secret TOTP);
+- `code` solo nelle **richieste** `/otp/*` (il codice OTP). Nelle risposte `code` è l'esito
+  (`000`, `020`, ...) e resta in chiaro.
 
-```json
-{"asctime": "...", "level": "INFO", "requestid": "24dc894f-9d46-400d-a431-da5c6afde458",
- "message": "HTTP request ricevuta", "context": {...}}
-```
+### request_id — client_request_id / X-Request-Id
+
+Ogni riga di log emessa durante una richiesta ha la chiave `"request_id"`, scelta in
+quest'ordine:
+1. `client_request_id` inviato dal client (body JSON, o query string per `GET /otp/status`);
+2. header `X-Request-Id`;
+3. UUID4 generato dal server.
+
+Se il client invia sia `client_request_id` sia `X-Request-Id`, vince `client_request_id`.
+`client_request_id` ha un limite di **100 caratteri** su tutti gli endpoint: oltre, la
+richiesta viene rifiutata con `422` e nel log di quella richiesta compare l'header (o
+l'UUID generato) al suo posto.
+
+La riga "HTTP request ricevuta" riporta anche `context.x_request_id`: l'header
+`X-Request-Id` così come è arrivato (`null` se assente), utile quando il client manda
+entrambi e `request_id` contiene quindi `client_request_id`. L'header non viene
+rifiutato se troppo lungo: viene troncato a 100 caratteri, sia qui sia in `request_id`.
+
+### application — X-Application o utente Basic Auth
+
+Ogni riga di log emessa durante una richiesta ha la chiave `"application"`
+(applicazione chiamante), scelta in quest'ordine:
+1. header `X-Application`;
+2. utente della Basic Auth applicativa;
+3. `null` (es. log di avvio, o `/health` chiamato senza nessuno dei due).
+
+`X-Application` è **facoltativo**, dichiarato nello Swagger su tutti gli endpoint
+applicativi (`/credential/verify*` e i 7 `/otp/*`; `ApplicationHeader`,
+`app/models/common_model.py`). Unico vincolo: max 100 caratteri, oltre → `422`.
+Il valore viene letto prima della validazione e prima della verifica della Basic Auth:
+anche le righe di una richiesta rifiutata (`422`/`401`) riportano quanto arrivato
+(troncato a 100 caratteri) — su un `401` può quindi essere un utente con password errata.
+
+
+### session_id — client_session_id
+
+Ogni riga di log emessa durante una richiesta ha la chiave `"session_id"`, uguale a
+`client_session_id` inviato dal client (body JSON, o query string per `GET /otp/status`).
+Facoltativo, su tutti gli endpoint applicativi, dichiarato nello Swagger; max 100
+caratteri (oltre → `422`). **Nessun fallback**: se il client non lo invia, `session_id`
+è `null`. Usato solo per i log: non viene scritto su nessuna tabella del DB.
+### elapsed_ms
+
+Campo presente in **ogni** riga di log, `0` salvo due casi:
+- **"HTTP response inviata"**: tempo totale impiegato per rispondere al client (dall'arrivo
+  della richiesta all'invio della risposta).
+- **risposta di un servizio esterno**: tempo impiegato dal servizio a rispondere.
+  - "Risposta SOAP ricevuta" / "Eccezione durante chiamata SOAP": solo la chiamata HTTP al
+    SOAP (dall'invio alla risposta, o al timeout/errore).
+  - "Check ... listening: UP/DOWN": la sola connessione TCP (SOAP o server di posta).
+
+L'invio SMTP non è misurato (resta `0`).
 
 ### Path del file di log
 
@@ -731,7 +785,7 @@ Utente PostgreSQL applicativo attuale: `auth` (config.yaml, `postgres.user`) sul
 Client POST /credential/verify-portale  [X-Request-Id: <uuid>]
   → flask-limiter: controlla contatore IP (429 se superato)
   → Middleware: g.request_id = header o nuovo UUID4
-                 log "HTTP request ricevuta" {requestid: ...}
+                 log "HTTP request ricevuta" {request_id: ...}
   → Pydantic valida CredentialVerifyPortaleRequest (422 se non valido)
   → CredentialVerifyPortaleController
       insert.auth_credential_log (history, service="verify-portale")
@@ -740,7 +794,7 @@ Client POST /credential/verify-portale  [X-Request-Id: <uuid>]
           altrimenti: XML non loggato, SSL SECLEVEL=0, POST SOAP, parse xmltodict
       update.auth_credential_log_extop (remote_response)
       update.auth_credential_log_end (sempre — auth_validation="soap", success, code)
-  → Middleware: log "HTTP response inviata" {requestid: ...}
+  → Middleware: log "HTTP response inviata" {request_id: ...}
                  risposta con header X-Request-Id
   → HTTP 200 {"code": "000", "auth_validation": "soap", "description": "Accesso autorizzato."}
 ```

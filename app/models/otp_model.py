@@ -23,6 +23,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, create_model, model_validator
 
+from app.utils.request_context import CLIENT_REQUEST_ID_MAX_LENGTH, CLIENT_SESSION_ID_MAX_LENGTH
+
 _DEFAULT_LOGIN_PATTERN  = r"^(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]+$"
 _DEFAULT_LOGIN_EXAMPLES = ["A1B2C3", "12345X", "otp42"]
 
@@ -97,9 +99,16 @@ def build_otp_models(cfg: dict) -> tuple[type[BaseModel], ...]:
         )),
         client_request_id=(Optional[str], Field(
             None,
+            max_length=CLIENT_REQUEST_ID_MAX_LENGTH,
             description="Id di correlazione del client (facoltativo, solo per i log/lo storico applicativo). "
                          "Se assente si usa il nostro X-Request-Id.",
             examples=["client-id-123"],
+        )),
+        client_session_id=(Optional[str], Field(
+            None,
+            max_length=CLIENT_SESSION_ID_MAX_LENGTH,
+            description="Id di sessione del client (facoltativo, solo per i log applicativi: campo session_id).",
+            examples=["client-session-456"],
         )),
     )
 
@@ -122,9 +131,16 @@ def build_otp_models(cfg: dict) -> tuple[type[BaseModel], ...]:
         )),
         client_request_id=(Optional[str], Field(
             None,
+            max_length=CLIENT_REQUEST_ID_MAX_LENGTH,
             description="Id di correlazione del client (facoltativo, solo per i log/lo storico applicativo). "
                          "Se assente si usa il nostro X-Request-Id.",
             examples=["client-id-123"],
+        )),
+        client_session_id=(Optional[str], Field(
+            None,
+            max_length=CLIENT_SESSION_ID_MAX_LENGTH,
+            description="Id di sessione del client (facoltativo, solo per i log applicativi: campo session_id).",
+            examples=["client-session-456"],
         )),
     )
 
@@ -159,9 +175,16 @@ def build_otp_models(cfg: dict) -> tuple[type[BaseModel], ...]:
         )),
         client_request_id=(Optional[str], Field(
             None,
+            max_length=CLIENT_REQUEST_ID_MAX_LENGTH,
             description="Id di correlazione del client (facoltativo, solo per i log/lo storico applicativo). "
                          "Se assente si usa il nostro X-Request-Id.",
             examples=["client-id-123"],
+        )),
+        client_session_id=(Optional[str], Field(
+            None,
+            max_length=CLIENT_SESSION_ID_MAX_LENGTH,
+            description="Id di sessione del client (facoltativo, solo per i log applicativi: campo session_id).",
+            examples=["client-session-456"],
         )),
     )
 
@@ -183,9 +206,16 @@ def build_otp_models(cfg: dict) -> tuple[type[BaseModel], ...]:
         )),
         client_request_id=(Optional[str], Field(
             None,
+            max_length=CLIENT_REQUEST_ID_MAX_LENGTH,
             description="Id di correlazione del client (facoltativo, solo per i log applicativi). "
                          "Se assente si usa il nostro X-Request-Id.",
             examples=["client-id-123"],
+        )),
+        client_session_id=(Optional[str], Field(
+            None,
+            max_length=CLIENT_SESSION_ID_MAX_LENGTH,
+            description="Id di sessione del client (facoltativo, solo per i log applicativi: campo session_id).",
+            examples=["client-session-456"],
         )),
     )
 
@@ -205,8 +235,14 @@ def build_otp_models(cfg: dict) -> tuple[type[BaseModel], ...]:
         )),
         client_request_id=(Optional[str], Field(
             None,
+            max_length=CLIENT_REQUEST_ID_MAX_LENGTH,
             description="Id di correlazione del client (facoltativo, solo per i log applicativi). "
                          "Se assente si usa il nostro X-Request-Id.",
+        )),
+        client_session_id=(Optional[str], Field(
+            None,
+            max_length=CLIENT_SESSION_ID_MAX_LENGTH,
+            description="Id di sessione del client (facoltativo, solo per i log applicativi: campo session_id).",
         )),
     )
 
@@ -259,9 +295,16 @@ def build_otp_models(cfg: dict) -> tuple[type[BaseModel], ...]:
         )),
         client_request_id=(Optional[str], Field(
             None,
+            max_length=CLIENT_REQUEST_ID_MAX_LENGTH,
             description="Id di correlazione del client (facoltativo, solo per i log applicativi). "
                          "Se assente si usa il nostro X-Request-Id.",
             examples=["client-id-123"],
+        )),
+        client_session_id=(Optional[str], Field(
+            None,
+            max_length=CLIENT_SESSION_ID_MAX_LENGTH,
+            description="Id di sessione del client (facoltativo, solo per i log applicativi: campo session_id).",
+            examples=["client-session-456"],
         )),
     )
 
@@ -294,9 +337,16 @@ class OtpConfirmRequest(BaseModel):
     code: str = Field(..., description="Primo codice letto dall'app authenticator (o dalla mail).", examples=["123456"])
     client_request_id: Optional[str] = Field(
         None,
+        max_length=CLIENT_REQUEST_ID_MAX_LENGTH,
         description="Id di correlazione del client (facoltativo, solo per i log applicativi). "
                      "Se assente si usa il nostro X-Request-Id.",
         examples=["client-id-123"],
+    )
+    client_session_id: Optional[str] = Field(
+        None,
+        max_length=CLIENT_SESSION_ID_MAX_LENGTH,
+        description="Id di sessione del client (facoltativo, solo per i log applicativi: campo session_id).",
+        examples=["client-session-456"],
     )
 
 

@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
 #
 # Auth API — immagine Docker
-# Build:  docker build -t auth-api:1.2.2 .
-# Run:    docker run -p 3002:3002 auth-api:1.2.2
+# Build:  docker build -t auth-api:1.2.3 .
+# Run:    docker run -p 3002:3002 auth-api:1.2.3
 #
 # NOTA: al momento della stesura di questo Dockerfile, python:3.14.7 è una
 # versione molto recente — alcuni pacchetti in requirements.txt hanno

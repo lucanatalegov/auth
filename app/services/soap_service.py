@@ -70,7 +70,8 @@ def check_tcp_listening(host: str | None, port: int | None, timeout_seconds: int
         result["elapsed_ms"] = round((time.perf_counter() - t) * 1000, 2)
         result["error"] = str(exc)
         log.error(f"Check {label} listening: DOWN",
-                  extra={"error_txt": str(exc), "host": host, "port": port})
+                  extra={"elapsed_ms": result["elapsed_ms"],
+                         "error_txt": str(exc), "host": host, "port": port})
 
     return result
 
@@ -182,6 +183,7 @@ def call_credential_verify_portale_soap(cfg: dict, login: str, password: str) ->
     session.mount("https://", adapter)
     session.mount("http://",  adapter)
 
+    t_ws = time.perf_counter()
     try:
         r = session.post(
             url     = soap_cfg["endpoint_url"],
@@ -190,6 +192,7 @@ def call_credential_verify_portale_soap(cfg: dict, login: str, password: str) ->
             verify  = False,
             timeout = int(soap_cfg.get("timeout_seconds", 30)),
         )
+        ws_elapsed_ms = round((time.perf_counter() - t_ws) * 1000, 2)
 
         response_dict = xmltodict.parse(r.text)
         out["status_code"]  = r.status_code
@@ -198,7 +201,8 @@ def call_credential_verify_portale_soap(cfg: dict, login: str, password: str) ->
         out["raw_response"] = f"HTTP {r.status_code}\n{r.text}"
 
         log.info("Risposta SOAP ricevuta",
-                 extra={"endpoint": soap_cfg["endpoint_url"],
+                 extra={"elapsed_ms": ws_elapsed_ms,
+                        "endpoint": soap_cfg["endpoint_url"],
                         "http_status": r.status_code,
                         "body_length": len(r.text)})
 
@@ -249,7 +253,8 @@ def call_credential_verify_portale_soap(cfg: dict, login: str, password: str) ->
 
     except Exception as exc:
         log.error("Eccezione durante chiamata SOAP",
-                  extra={"endpoint": soap_cfg["endpoint_url"], "error_txt": str(exc)},
+                  extra={"elapsed_ms": round((time.perf_counter() - t_ws) * 1000, 2),
+                         "endpoint": soap_cfg["endpoint_url"], "error_txt": str(exc)},
                   exc_info=True)
         out["code"]         = "300"
         out["wsdlresponse"] = "il portale e' andato in anomalia , riprovare"
@@ -320,6 +325,7 @@ def call_credential_verify_soap(cfg: dict, login: str, password: str) -> dict:
     session.mount("https://", adapter)
     session.mount("http://",  adapter)
 
+    t_ws = time.perf_counter()
     try:
         r = session.post(
             url     = soap_cfg["endpoint_url"],
@@ -328,6 +334,7 @@ def call_credential_verify_soap(cfg: dict, login: str, password: str) -> dict:
             verify  = False,
             timeout = int(soap_cfg.get("timeout_seconds", 30)),
         )
+        ws_elapsed_ms = round((time.perf_counter() - t_ws) * 1000, 2)
 
         response_dict = xmltodict.parse(r.text)
         out["status_code"]   = r.status_code
@@ -336,7 +343,8 @@ def call_credential_verify_soap(cfg: dict, login: str, password: str) -> dict:
         out["raw_response"]  = f"HTTP {r.status_code}\n{r.text}"
 
         log.info("Risposta SOAP ricevuta",
-                 extra={"endpoint": soap_cfg["endpoint_url"],
+                 extra={"elapsed_ms": ws_elapsed_ms,
+                        "endpoint": soap_cfg["endpoint_url"],
                         "http_status": r.status_code,
                         "body_length": len(r.text)})
 
@@ -386,7 +394,8 @@ def call_credential_verify_soap(cfg: dict, login: str, password: str) -> dict:
 
     except Exception as exc:
         log.error("Eccezione durante chiamata SOAP",
-                  extra={"endpoint": soap_cfg["endpoint_url"], "error_txt": str(exc)},
+                  extra={"elapsed_ms": round((time.perf_counter() - t_ws) * 1000, 2),
+                         "endpoint": soap_cfg["endpoint_url"], "error_txt": str(exc)},
                   exc_info=True)
         out["code"]         = "300"
         out["wsdlresponse"] = "il portale e' andato in anomalia , riprovare"
